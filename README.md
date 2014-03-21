@@ -1,4 +1,4 @@
-ora-scripts
-===========
+Oracle Scripts
+==============
 
-Collection of Oracle scripts
+This is my collection of Oracle scripts and readmes.
