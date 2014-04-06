@@ -1,0 +1,50 @@
+# Backup
+
+To take a cold backup of the database:
+
+    rman target /
+
+    shutdown immediate 
+    startup mount 
+    run 
+    { allocate channel ch1 device type disk format 'c:\alaric_db_backup\alaricDB_%u_%p_%c';   
+      backup as compressed backupset incremental level 0 tag="Alaric_fullDB" database; 
+    } 
+    list backup tag="Alaric_fullDB";
+
+From the log output, you need to capture two pieces of information:
+
+    connected to target database: XE (DBID= *2671809425*)   <==== Save this ID number
+
+Identify the backup piece that contains the SP and Control files, eg:
+
+    BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+    ------- ---- -- ---------- ----------- ------------ ---------------
+    2       Incr 0  1.03M      DISK        00:00:01     07-AUG-12
+            BP Key: 2   Status: AVAILABLE  Compressed: YES  Tag: ALARIC_FULLDB
+            Piece Name: C:\ALARIC_DB_BACKUP\ALARICDB_02NI201U_1_1         <====== PIECE NAME
+      Control File Included: Ckp SCN: 218491       Ckp time: 07-AUG-12    <====== control file
+      SPFILE Included: Modification time: 07-AUG-12                       <====== SPFILE included
+
+
+# Restore
+
+Notice the DBID and SPFILE and Control File reference the data that was captured above.
+
+    set ORACLE_SID=xe 
+    rman target /
+
+    set dbid 2671809425
+    startup nomount
+    restore spfile from 'C:\ALARIC_DB_BACKUP\ALARICDB_02NI201U_1_1';
+    startup force nomount
+    restore controlfile from 'C:\ALARIC_DB_BACKUP\ALARICDB_02NI201U_1_1';
+    alter database mount;
+    restore database;
+    alter database open resetlogs;
+
+
+Some good detail (although a little old) here - http://www.orafusion.com/art_rman1.htm
+
+
+

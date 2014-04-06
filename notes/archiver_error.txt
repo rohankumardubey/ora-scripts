@@ -1,0 +1,11 @@
+Generally Archiver error is caused by full recovery_file dest:
+
+select  name,  (space_limit/1048576),(space_used/1048576)
+from  v$recovery_file_dest;
+
+
+The easiest quick fix is to bump the size of the recovery_file_dest:
+
+alter system set db_recovery_file_dest_size=20G scope=both;
+
+However, it maybe useful to remove archive_log_files using rman if it is a dev environment.
