@@ -1,0 +1,5 @@
+select * 
+  from ( select a.*, rownum rnum
+           from ( YOUR_QUERY_GOES_HERE -- including the order by ) a
+          where rownum <= MAX_ROWS )
+ where rnum >= MIN_ROWS

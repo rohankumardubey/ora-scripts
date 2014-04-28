@@ -1,0 +1,103 @@
+
+-- basic plan query.
+
+select LPAD(' ', 2 * LEVEL - 1) ||operation||' ', 
+       options, object_owner||'.'||object_name, 
+       id, 
+       parent_id, 
+       partition_start pstart, 
+       partition_stop pend 
+from plan_table
+connect by prior id = parent_id 
+start with parent_id is null
+order by id asc
+
+
+To create the plan table:
+
+CREATE TABLE PLAN_TABLE
+(
+  STATEMENT_ID     VARCHAR2(30),
+  TIMESTAMP        DATE,
+  REMARKS          VARCHAR2(80),
+  OPERATION        VARCHAR2(30),
+  OPTIONS          VARCHAR2(30),
+  OBJECT_NODE      VARCHAR2(128),
+  OBJECT_OWNER     VARCHAR2(30),
+  OBJECT_NAME      VARCHAR2(30),
+  OBJECT_INSTANCE  INTEGER,
+  OBJECT_TYPE      VARCHAR2(30),
+  OPTIMIZER        VARCHAR2(255),
+  SEARCH_COLUMNS   NUMBER,
+  ID               INTEGER,
+  PARENT_ID        INTEGER,
+  POSITION         INTEGER,
+  COST             INTEGER,
+  CARDINALITY      INTEGER,
+  BYTES            INTEGER,
+  OTHER_TAG        VARCHAR2(255),
+  PARTITION_START  VARCHAR2(255),
+  PARTITION_STOP   VARCHAR2(255),
+  PARTITION_ID     INTEGER,
+  OTHER            LONG,
+  DISTRIBUTION     VARCHAR2(30),
+  CPU_COST         INTEGER,
+  IO_COST          INTEGER,
+  TEMP_SPACE       INTEGER
+)
+TABLESPACE USERS
+PCTUSED    40
+PCTFREE    10
+INITRANS   1
+MAXTRANS   255
+STORAGE    (
+            INITIAL          128K
+            NEXT             128K
+            MINEXTENTS       1
+            MAXEXTENTS       4096
+            PCTINCREASE      0
+            FREELISTS        1
+            FREELIST GROUPS  1
+            BUFFER_POOL      DEFAULT
+           )
+LOGGING 
+NOCACHE
+NOPARALLEL;
+
+
+
+
+Full script:
+
+set lines 250
+
+delete from plan_table;
+
+explain plan for
+SELECT   a.GROUP_ID, b.test_result, b.test_id, b.test_reason_id
+    FROM prot_bal_client_tests a, prot_bal_results b
+   WHERE b.record_id = :b1
+     AND sub_client_id = :b2
+     AND a.test_id = b.test_id
+     AND test_user_id = :b3
+     AND a.test_type = b.test_user_id
+     AND (a.GROUP_ID IS NOT NULL AND LENGTH (a.GROUP_ID) > 1)
+     AND test_result IN ('F', 'R', 'E')
+     AND b.status = 'O'
+ORDER BY a.GROUP_ID, a.test_id;
+
+COLUMN operation FORMAT A50
+COLUMN obj FORMAT A40
+COLUMN pstart FORMAT A5
+COLUMN pend FORMAT A5
+
+select LPAD(' ', 2 * LEVEL - 1) ||operation||' '||options operation, 
+       object_owner||'.'||object_name obj, 
+       id, 
+       parent_id, 
+       partition_start pstart, 
+       partition_stop pend 
+from plan_table
+connect by prior id = parent_id 
+start with parent_id is null
+order by id asc;

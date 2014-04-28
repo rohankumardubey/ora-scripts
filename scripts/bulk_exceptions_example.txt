@@ -1,0 +1,43 @@
+function log_outgoing_messages ( i_job_name in varchar2,
+                                 i_mq_log_seq in integer,
+                                 i_msgs in dbms_aq.msgid_array_t )
+return index_t
+is
+PRAGMA Autonomous_transaction;
+  v_dup_ids index_t;
+  dml_errors EXCEPTION;
+  PRAGMA EXCEPTION_INIT(dml_errors, -24381);
+begin
+  debug.f( 'Entered log_outgoing_messages' );
+  v_dup_ids.delete;
+  forall i in i_msgs.first .. i_msgs.last save exceptions
+    insert into mq_outgoing_log (job_name,
+                                 mq_log_seq,
+                                 msgid
+                                )
+                        values ( i_job_name,
+                                 i_mq_log_seq,
+                                 i_msgs(i)
+                               );
+  commit;
+  return v_dup_ids;
+exception
+  when dml_errors then
+    debug.f( 'There were exceptions logging the outgoing message ids' );
+    for i in 1 .. SQL%bulk_exceptions.count loop
+      -- we expect unique index violations, but nothing else
+      -- so raise anything else.
+      if SQL%BULK_EXCEPTIONS(i).ERROR_CODE != 00001 then
+        debug.f( '  ... An unexpected exception occurred (%s)', SQLERRM );
+        raise;
+      end if;
+      v_dup_ids(v_dup_ids.count+1) := SQL%bulk_exceptions(i).ERROR_INDEX;
+    end loop;
+    commit;
+    return v_dup_ids;
+  when others then
+    debug.f( 'An unexpected Oracle Error occurred in log_outgoing_messages: %s', SQLERRM );
+    rollback;
+    raise;
+end log_outgoing_messages;
+
