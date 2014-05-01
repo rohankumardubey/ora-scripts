@@ -25,7 +25,7 @@ PROMPT INDEXES
 
 break on index_name skip 2 on report
 
-select a.index_name, decode(b.uniqueness, 'NONUNIQUE', 'N', 'Y') uniq, b.partitioned, a.column_name, a.column_position
+select a.index_name, decode(b.uniqueness, 'NONUNIQUE', 'N', 'Y') uniq, b.partitioned, a.column_name, a.column_position, b.status
 from all_ind_columns a, all_indexes b
 where a.table_name = upper('&&table')
 and a.table_owner = nvl(upper('&&schema'), a.table_owner)
