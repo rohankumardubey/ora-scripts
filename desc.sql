@@ -8,16 +8,27 @@ set lines 250
 
 col data_type for a20
 col column_name for a30
+col partition_columns for a60
 
 accept table prompt 'Table Name: '
 accept schema prompt 'Schema: '
 
 PROMPT TABLE INFORMATION
 
-select column_name, data_type, data_length, data_precision, nullable 
-from all_tab_columns 
-where table_name = upper('&&table')
-and owner = nvl(upper('&&schema'), owner);
+select a.column_name, 
+       a.data_type, 
+       a.data_length, 
+       a.data_precision, 
+       a.nullable, 
+       case when b.column_name is not null then '*' else null end partitioned_column
+from all_tab_columns a, 
+     all_part_key_columns b 
+where a.table_name = upper('&&table')
+and a.owner = nvl(upper('&&schema'), a.owner)
+and a.owner = b.owner(+)
+and a.table_name = b.name(+)
+and a.column_name = b.column_name(+);
+
 
 PROMPT
 PROMPT
