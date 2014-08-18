@@ -1,0 +1,564 @@
+# Backup
+
+This guide assumes a database in NOARCHIVELOG mode.
+
+It also assumes you are restoring to a server where the file layout is different from the original server.
+
+## Take a cold backup
+
+To take a cold backup of the database:
+
+    rman target /
+
+    shutdown immediate 
+    startup mount 
+    run 
+    { allocate channel ch1 device type disk format '/dborafiles/apex01_backup/apex01_%u_%p_%c';   
+      backup as compressed backupset incremental level 0 tag="Apex01_fullDB" database; 
+    } 
+    list backup tag="Apex_fullDB";
+
+Capture the log output, and there are a few key pieces it is useful to keep:
+
+```
+connected to target database: APEX01 (DBID= *1643573941*)   <==== Save this ID number
+
+Starting backup at 16-JUL-14
+channel ch1: starting compressed incremental level 0 datafile backup set
+channel ch1: specifying datafile(s) in backup set
+input datafile file number=00003 name=/dborafiles/apex01/datafiles/undo.dbf
+input datafile file number=00002 name=/dborafiles/apex01/datafiles/sysaux.dbf
+input datafile file number=00005 name=/dborafiles/apex01/datafiles/apex_user_01.dbf
+input datafile file number=00006 name=/dborafiles/apex01/datafiles/apex_files_01.dbf
+input datafile file number=00001 name=/dborafiles/apex01/datafiles/system.dbf
+input datafile file number=00004 name=/dborafiles/apex01/datafiles/users_01.dbf
+channel ch1: starting piece 1 at 16-JUL-14
+channel ch1: finished piece 1 at 16-JUL-14
+piece handle=/dborafiles/apex01_backup/apex01_01pdgmuo_1_1 tag=APEX01_FULLDB comment=NONE
+channel ch1: backup set complete, elapsed time: 00:00:55
+channel ch1: starting compressed incremental level 0 datafile backup set
+channel ch1: specifying datafile(s) in backup set
+including current control file in backup set
+including current SPFILE in backup set
+channel ch1: starting piece 1 at 16-JUL-14
+channel ch1: finished piece 1 at 16-JUL-14
+piece handle=/dborafiles/apex01_backup/apex01_02pdgn0f_1_1 tag=APEX01_FULLDB comment=NONE
+channel ch1: backup set complete, elapsed time: 00:00:01
+Finished backup at 16-JUL-14
+released channel: ch1
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+1       Incr 0  267.04M    DISK        00:00:48     16-JUL-14
+        BP Key: 1   Status: AVAILABLE  Compressed: YES  Tag: APEX01_FULLDB
+        Piece Name: /dborafiles/apex01_backup/apex01_01pdgmuo_1_1
+  List of Datafiles in backup set 1
+  File LV Type Ckp SCN    Ckp Time  Name
+  ---- -- ---- ---------- --------- ----
+  1    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/system.dbf
+  2    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/sysaux.dbf
+  3    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/undo.dbf
+  4    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/users_01.dbf
+  5    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/apex_user_01.dbf
+  6    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/apex_files_01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+2       Incr 0  1.03M      DISK        00:00:02     16-JUL-14
+        BP Key: 2   Status: AVAILABLE  Compressed: YES  Tag: APEX01_FULLDB
+        Piece Name: /dborafiles/apex01_backup/apex01_02pdgn0f_1_1        <=========== piece name
+  SPFILE Included: Modification time: 16-JUL-14                          <=========== spfile file included
+  SPFILE db_unique_name: APEX01                                          
+  Control File Included: Ckp SCN: 344249820984   Ckp time: 16-JUL-14     <=========== control file included
+```
+
+Now you can copy the backup to the new server using SCP, rsync etc. Note that the restore process is slightly easier if you place the backup files in the exact same location on the new server as they were created on the old server.
+
+
+# Restore
+
+To create a restore of the old database (with the same DBID and SID), you need the DBID that was captured above.
+
+First set the Oracle SID to be the same as the old database, APEX01 in this case, and connect to RMAN
+
+Notice the DBID and SPFILE and Control File reference the data that was captured above.
+
+```
+export ORACLE_SID=APEX01
+rman target / NOCATALOG
+set DBID=1643573941
+startup nomount
+```
+
+RMAN will compain that it cannot find the parameter file, but it will go ahead and start and Oracle instance without a parameter file:
+
+```
+RMAN>
+startup failed: ORA-01078: failure in processing system parameters
+LRM-00109: could not open parameter file '/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/initAPEX01.ora'
+
+starting Oracle instance without parameter file for retrieval of spfile
+Oracle instance started
+```
+
+## Restore the SPFile
+
+As we have started RMAN without a recovery catalog, we need to tell it where to find the backup at.
+
+Also, because the file layout of the new server is different from the old one, we need to perform a few extra steps to change the file locations.
+
+
+```
+RUN
+{
+  allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';   
+  SET CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE DISK TO '/tmp/%F';
+  RESTORE SPFILE 
+    TO PFILE '?/dbs/initAPEX01.ora' 
+    from '/oraworkspace/apex01_backup/apex01_02pdgn0f_1_1';  
+  SHUTDOWN ABORT;
+}
+```
+
+This command points RMAN at our backup set (using the same format as the backup used). Then it restores the SPFILE to a plain text pfile so we can edit it. Notice the full path to the backup piece (which we captured above) is included in the command.
+
+Now edit the spfile and change any paths that referenced files on the old server to the new server paths. In my case, I had to edit the control file paths and the diag_dest parameters
+
+## Restore the Control Files
+
+Next, we need to restore the control files:
+
+```
+startup force nomount pfile='?/dbs/initAPEX01.ora';
+RUN
+{
+  allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';   
+  RESTORE CONTROLFILE FROM '/oraworkspace/apex01_backup/apex01_02pdgn0f_1_1';
+  ALTER DATABASE MOUNT;
+}
+```
+
+Again, we tell RMAN which backup piece to find the controlfile in.
+
+## Rename Datafiles and Restore
+
+This step is easiest if you still have access to the original database. You need to get a list of all the datafiles and redo log files from the old database, and rename then to the new path. If the old database is no longer available, I found that RMAN prints an error for each file, so it is possible to grab them from the error message and go from there.
+
+My database didn't have too many datafiles, so to complete the restore I ran the following:
+
+```
+run 
+{
+allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';  
+catalog start with '/oraworkspace/apex01_backup/apex01_01pdgmuo_1_1'; 
+set newname for datafile 1 to '/oraworkspace/apex01/system.dbf';
+set newname for datafile 2 to '/oraworkspace/apex01/sysaux.dbf';
+set newname for datafile 3 to '/oraworkspace/apex01/undo.dbf';
+set newname for datafile 4 to '/oraworkspace/apex01/users_01.dbf';
+set newname for datafile 5 to '/oraworkspace/apex01/apex_user_01.dbf';
+set newname for datafile 6 to '/oraworkspace/apex01/apex_files_01.dbf';
+set newname for tempfile 1 to '/oraworkspace/apex01/temp.dbf';
+
+SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo1.log'' TO ''/oraworkspace/apex01/redo1.log'' ";
+SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo2.log'' TO ''/oraworkspace/apex01/redo2.log'' ";
+SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo3.log'' TO ''/oraworkspace/apex01/redo3.log'' ";
+
+restore database;
+SWITCH DATAFILE ALL;
+SWITCH TEMPFILE ALL;
+}
+```
+
+This renames each of my datafiles to a new location, and also renames my redo log files.
+
+Note, that if all files are going to the exact same location as the old files, the newname, SQL and SWITCH DATAFILE command should not be required.
+
+Also, if the rman backup files are in the same location on the new server as they were created on the old server, the 'catalog start with' command should not be required either.
+
+## Open the restored database
+
+At this point, the database is ready to open
+
+```
+RMAN> alter database open resetlogs;
+```
+
+You will probably also want to create a spfile from the database pfile:
+
+```
+SQL> create spfile from pfile;
+```
+
+Job done!
+
+
+# Upgrading an 11gR2 database to a newer patchset.
+
+Upgrading a database to a new patchset within the same major version is a pretty simple process. These days, Oracle don't supply a patchset for the database, you need to download the full Oracle binaries for the version you want to install. 
+
+The first step is to create a new Oracle home with the new patchset version. Then shutdown the database you want to upgrade.
+
+Next, switch the Oracle home to the new Oracle home in /etc/oratab. Then make sure your Oracle environment is correctly setup for the new home using the oraenv script.
+
+Finally, bring the database up in upgrade mode and run the following scripts:
+
+```
+sqlplus / as sysdba
+SQL> startup upgrade
+SQL> spool upgradelog.log
+SQL> @?/rdbms/admin/catupgrd.sql
+```
+
+The catupgrd script will probably run for 5 or 10 minutes. When it completes, check that there were no errors generated by the catupgrd script. According to the documentation, the script should go in cleanly on the first run without generating any errors. To check for this, search for lines that start with 'ORA-'.
+
+Next run the following commands to complete the operation:
+
+```
+SQL> shutdown immediate
+SQL> startup
+SQL> @?/rdbms/admin/catuppst.sql
+SQL> @?/rdbms/admin/utlrp.sql
+```
+
+To ensure the upgrade was successful , check everything is valid in DBA_REGISTRY:
+
+``` 
+select comp_name, status from dba_registry;
+```
+
+If there are invalid components in DBA_REGISTRY, it is probably time to start searching on Oracle support!
+
+It goes without saying that you should do a complete DB backup before attempting the upgrade, just incase!
+
+
+# TO move an non ASM database into ASM
+
+
+## With the non-asm database up and running, change the control_files parameter and db_create_file_dest parameters to point at ASM instead of their current location:
+
+```
+alter system set control_files='+DATADG', '+DATADG', '+DATADG' scope=spfile;
+alter system set db_create_file_dest='+DATADG';
+```
+
+Now shutdown the database and bring it backup with nomount:
+
+```
+shutdown immediate;
+startup nomount;
+```
+
+Now jump into RMAN to copy the relevant files into ASM:
+
+```
+rman target /
+restore controlfile from '/oraworkspace/apex01/control01.ora';
+backup as copy database format '+DATADG';
+switch database to copy;
+alter database open;
+```
+
+We are nearly done, but there are 3 more things to do:
+
+## Fix the temporary tablespace
+
+```
+select file_name, tablespace_name
+from dba_temp_files;
+
+FILE_NAME            TABLESPACE_NAME
+-------------------- ------------------------------
+/oraworkspace/apex01 TEMP
+/temp.dbf
+
+alter tablespace temp add tempfile size 500M;
+alter database tempfile '/oraworkspace/apex01/temp.dbf' drop including datafiles;
+```
+
+## Fix the redo logs
+
+The redo logs will all still be outside ASM, so they need dropped and recreated inside ASM:
+
+```
+SQL> select group#, status, bytes from v$log;
+
+    GROUP# STATUS                BYTES
+---------- ---------------- ----------
+         1 INACTIVE           52428800
+         2 INACTIVE           52428800
+         3 CURRENT            52428800
+```
+
+Groups 1 and 2 are inactive, so they can be dropped and recreated:
+
+```
+alter database drop logfile group 1;
+alter database add logfile group 1 size 52428800;
+alter database drop logfile group 2;
+alter database add logfile group 2 size 52428800;
+```
+
+Switch the logs and recreate the final group:
+
+```
+alter system switch logfile;
+alter database drop logfile group 3;
+alter database add logfile group 3 size 52428800;
+```
+
+Check the logs are all now in ASM:
+
+```
+select member from v$logfile
+
+MEMBER
+--------------------------------------------------
++DATADG/apex01/onlinelog/group_1.278.853143825
++DATADG/apex01/onlinelog/group_2.273.853143825
++DATADG/apex01/onlinelog/group_3.276.853144187
+```
+
+
+## Get the SPFile into ASM
+
+Finally, copy the SPFile into ASM. To do this create a pfile and then create the spfile in ASM:
+
+```
+create pfile from spfile;
+create spfile='+DATADG/APEX01/spfileAPEX01.ora' from pfile;
+shutdown immediate;
+```
+
+Now create a file called initAPEX01.ora in the ORACLE_HOME/dbs directory, and put the following contents in it:
+
+
+
+restore spfile to '+DATADG/APEX01/spfileAPEX01.ora' from '/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/spfileAPEX01.ora'
+
+```
+spfile='+DATADG/APEX01/spfileAPEX01.ora'
+```
+
+Restart the instance and confirm the spfile being used is in ASM:
+
+```
+SQL> show parameter spfile;
+
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+spfile                               string      +DATADG/apex01/spfileapex01.or
+                                                 a
+```
+
+
+That is all there is to it.
+
+
+
+
+###########
+
+
+
+
+
+
+1. Change the locations of the DB Control files to be ASM
+2. Use RMAN to copy the database into ASM
+3. 
+
+## Create a backup copy of the database
+
+rman target /
+
+shutdown immediate 
+startup mount 
+run 
+{ allocate channel ch1 device type disk;
+  backup as copy incremental level 0 database format= '+DATADG' tag="Apex01_asm_migration" database; 
+} 
+list backup tag="Apex01_asm_migration";
+
+This will place all the database datafiles into ASM under +DATADG/<SID>/DATAFILE.
+
+Next, you want to get the SPFile into ASM:
+
+Assuming you have an SPfile already, then copy the spfile into ASM:
+
+run {
+   BACKUP AS BACKUPSET SPFILE;
+   RESTORE SPFILE TO "+DATADG/APEX01/spfileAPEX01.ora";
+}
+
+Also, get the database controlfiles into ASM
+
+```
+restore controlfile from '/oraworkspace/apex01/control01.ora'
+```
+
+
+
+
+SQL> shutdown immediate;
+Database closed.
+Database dismounted.
+ORACLE instance shut down.
+
+Create a simple init.ora that points at the instance spfile containing only the following:
+
+SPFILE=+DATADG/APEX01/spfileapex01.ora
+
+Start the instance using the ASM spfile:
+
+SQL> startup nomount pfile='/tmp/init.ora'
+
+
+alter system set control_files='+DATADG/APEX01/current.274.853125879', '+DATADG/APEX01/current.275.853125879', '+DATADG/APEX01/current.276.853125879' scope=spfile;
+
+Now connect as RMAN:
+
+RMAN> shutdown immediate;
+RMAN> startup nomount PFILE='/tmp/pfile.ora'; #using ASM SPFILE now
+RMAN> restore controlfile from '/oraworkspace/apex01/control01.ora';
+RMAN> alter database mount;
+RMAN> switch database to copy;
+RMAN> recover database;
+
+run {
+  set newname for tempfile 1 to '+DATADG';
+  switch tempfile all;
+}
+
+
+
+
+select l.group# , l.bytes , l.status , lf.member
+from v$logfile lf , v$log l
+where lf.group# = l.group#;
+
+
+alter database drop logfile group 1;
+
+Database altered.
+
+SQL> alter database add logfile group 1 size 52428800;
+
+etc
+
+
+
+# Sort out the SPFile
+
+
+
+
+current.274.853125879
+current.275.853125879
+current.276.853125879
+
+
+
+BACKUP AS COPY OUTPUT
+
+Starting backup at 17-JUL-14
+channel ch1: starting datafile copy
+input datafile file number=00003 name=/oraworkspace/apex01/undo.dbf
+output file name=+DATADG/apex01/datafile/undo.271.853141259 tag=APEX01_ASM_MIGRATION RECID=13 STAMP=853141261
+channel ch1: datafile copy complete, elapsed time: 00:00:07
+channel ch1: starting datafile copy
+input datafile file number=00003 name=/oraworkspace/apex01/undo.dbf
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/data_D-APEX01_I-1643573941_TS-UNDO_FNO-3_05pdjpoe tag=TAG20140717T074055 RECID=14 STAMP=853141270
+channel ch1: datafile copy complete, elapsed time: 00:00:15
+channel ch1: starting datafile copy
+input datafile file number=00002 name=/oraworkspace/apex01/sysaux.dbf
+output file name=+DATADG/apex01/datafile/sysaux.270.853141277 tag=APEX01_ASM_MIGRATION RECID=15 STAMP=853141279
+channel ch1: datafile copy complete, elapsed time: 00:00:03
+channel ch1: starting datafile copy
+input datafile file number=00002 name=/oraworkspace/apex01/sysaux.dbf
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/data_D-APEX01_I-1643573941_TS-SYSAUX_FNO-2_07pdjpp0 tag=TAG20140717T074055 RECID=16 STAMP=853141285
+channel ch1: datafile copy complete, elapsed time: 00:00:07
+channel ch1: starting datafile copy
+input datafile file number=00005 name=/oraworkspace/apex01/apex_user_01.dbf
+output file name=+DATADG/apex01/datafile/apex_user.269.853141287 tag=APEX01_ASM_MIGRATION RECID=17 STAMP=853141289
+channel ch1: datafile copy complete, elapsed time: 00:00:03
+channel ch1: starting datafile copy
+input datafile file number=00006 name=/oraworkspace/apex01/apex_files_01.dbf
+output file name=+DATADG/apex01/datafile/apex_files.268.853141291 tag=APEX01_ASM_MIGRATION RECID=18 STAMP=853141292
+channel ch1: datafile copy complete, elapsed time: 00:00:03
+channel ch1: starting datafile copy
+input datafile file number=00005 name=/oraworkspace/apex01/apex_user_01.dbf
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/data_D-APEX01_I-1643573941_TS-APEX_USER_FNO-5_0apdjppe tag=TAG20140717T074055 RECID=19 STAMP=853141298
+channel ch1: datafile copy complete, elapsed time: 00:00:07
+channel ch1: starting datafile copy
+input datafile file number=00006 name=/oraworkspace/apex01/apex_files_01.dbf
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/data_D-APEX01_I-1643573941_TS-APEX_FILES_FNO-6_0bpdjppl tag=TAG20140717T074055 RECID=20 STAMP=853141305
+channel ch1: datafile copy complete, elapsed time: 00:00:07
+channel ch1: starting datafile copy
+input datafile file number=00001 name=/oraworkspace/apex01/system.dbf
+output file name=+DATADG/apex01/datafile/system.267.853141309 tag=APEX01_ASM_MIGRATION RECID=21 STAMP=853141309
+channel ch1: datafile copy complete, elapsed time: 00:00:03
+channel ch1: starting datafile copy
+input datafile file number=00001 name=/oraworkspace/apex01/system.dbf
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/data_D-APEX01_I-1643573941_TS-SYSTEM_FNO-1_0dpdjppv tag=TAG20140717T074055 RECID=22 STAMP=853141314
+channel ch1: datafile copy complete, elapsed time: 00:00:03
+channel ch1: starting datafile copy
+input datafile file number=00004 name=/oraworkspace/apex01/users_01.dbf
+output file name=+DATADG/apex01/datafile/users.266.853141315 tag=APEX01_ASM_MIGRATION RECID=23 STAMP=853141314
+channel ch1: datafile copy complete, elapsed time: 00:00:01
+channel ch1: starting datafile copy
+input datafile file number=00004 name=/oraworkspace/apex01/users_01.dbf
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/data_D-APEX01_I-1643573941_TS-USERS_FNO-4_0fpdjpq3 tag=TAG20140717T074055 RECID=24 STAMP=853141316
+channel ch1: datafile copy complete, elapsed time: 00:00:01
+channel ch1: starting datafile copy
+copying current control file
+output file name=+DATADG/apex01/controlfile/backup.272.853141317 tag=APEX01_ASM_MIGRATION RECID=25 STAMP=853141316
+channel ch1: datafile copy complete, elapsed time: 00:00:01
+channel ch1: starting datafile copy
+copying current control file
+output file name=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/cf_D-APEX01_id-1643573941_0hpdjpq5 tag=TAG20140717T074055 RECID=26 STAMP=853141318
+channel ch1: datafile copy complete, elapsed time: 00:00:01
+channel ch1: starting incremental level 0 datafile backup set
+channel ch1: specifying datafile(s) in backup set
+including current SPFILE in backup set
+channel ch1: starting piece 1 at 17-JUL-14
+channel ch1: finished piece 1 at 17-JUL-14
+piece handle=+DATADG/apex01/backupset/2014_07_17/nnsnn0_apex01_asm_migration_0.277.853141319 tag=APEX01_ASM_MIGRATION comment=NONE
+channel ch1: backup set complete, elapsed time: 00:00:01
+channel ch1: starting incremental level 0 datafile backup set
+channel ch1: specifying datafile(s) in backup set
+including current SPFILE in backup set
+channel ch1: starting piece 1 at 17-JUL-14
+channel ch1: finished piece 1 at 17-JUL-14
+piece handle=/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs/0jpdjpq8_1_1 tag=TAG20140717T074055 comment=NONE
+channel ch1: backup set complete, elapsed time: 00:00:01
+Finished backup at 17-JUL-14
+released channel: ch1
+
+
+
+
+select internal_transaction_uuid, transaction_uuid
+from hpa_rpt.TRANSACTION_ACTIVITY 
+where transaction_uuid in (
+'407fe65445a9e72e0552679e2af7dab3',
+'13989e448134bc516f6239436ca0037e',
+'b26b92ec5f27adf4f35eb354e24f4593',
+'a4cba2b701162cc8ac3a1ceeede9394c',
+'eb6b0371062e356281dc8dc2433c9f55',
+'5490ed71e10e541cf03c2a678df7feaf',
+'89e9dfa96fe46d3a3e868d54978cee65',
+'b9e23ac238dedf05080907fb6412ed93',
+'926e64f4fe451fc8c219b99dd746806a',
+'1771a5c8a2cf114e3f2ce5b71a249365',
+'7ff3cc9373f512996b11dc4a9e0db890',
+'3e40bb274b7977c0a9e12befcd41f1ec',
+'a1db446afa8ee0bebc42e9728186e19d',
+'4c95a40843813ed64874b5720022c367',
+'4aa13ba500e1bbad8a9e055e43fef57c'
+);
+

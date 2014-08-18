@@ -1,0 +1,262 @@
+# Overview
+
+
+Major components in Goldengate system:
+
+ * Extract - runs on source system capturing changes and writing to trail files
+ * DataPump - optional but very recommended. Receives changes from extract and buffers on source. Protects extract system from TCP issues. Also can do data transforms.
+ * Replicat - Applies changes on the target system
+ * Trails (extract files) - Files on disk where changes are stored. Can be encrypted if required.
+ * Checkpoints - Marks about where in a database log file have been read upto or how far a replicat has read into a trail file etc.
+ * Manager - supervisor process that starts other Goldengate processes - this is the only process a user starts.
+ * Collector - Receives the trail file data on a target system from an extract or datapump process
+
+
+Config files are stored in dirprm/
+
+# Manager 
+
+## Edit Config
+
+To edit the manager config file:
+
+    $ edit params mrg
+
+Sample config:
+
+    PORT 7809
+    -- these are the ports collectors run on
+    DYNAMICPORTLIST 7810-7820, 7830
+    AUTOSTART ER t*
+    AUTORESTART ER t*, RETRIES 4, WAITMINUTES 4
+    STARTUPVALIDATIONDELAY 5
+    PURGEOLDEXTRACTS /ogg/dirdat/tt*, USECHECKPOINTS, MINKEEPHOURS 2
+
+## Start Manager
+
+To Start the manager, you can do it from the shell:
+
+    $ mrg paramfile <filename> [reportfile <report file>]
+
+OR from ggsci tool:
+
+    GGSCI> START MANAGER
+
+## Stop Manager
+
+Only from ggsci:
+
+    GGSCI> STOP MANAGER [!]
+
+
+# Useful GGSCI Commands
+
+ * info all - show status of all processes
+ * view report <process> - view logfile for process
+ * edit params <process> - change the config file for a process
+
+ 
+
+# Command Line
+
+The command line tool is called ggsci - switch to the install directory and run ./ggsci to start it. It allows everything to be started, stopped and configured.
+
+GLOBALS File - stores parameters that are relevant to GG as a whole. Stored in a file called GLOBALS (no extension) in the root of the GG install directory.
+
+If you change GLOBALS, you must exit and restart ggsci to pick up the changes.
+
+
+# Parameter Files
+
+Global parameters - apply to all objects in file vs others which apply to specific objects. Specifying a global parameter more than once means the last definition takes effect.
+
+From GGSCI
+
+    GGSCI> edit params <group name>
+
+Group name can be mgr for the manager process, or the name of the replicate group for others.
+
+To check the syntax of a param file, enter CHECKPARAMS in the file, then issue the start command, eg:
+
+    GGSCI> start replicat <group name>
+
+This will check the syntax, print results and then exit the process. The process will not actually start running with CHECKPARAMS in the file.
+
+To view parameters:
+
+    GGSCI view params <group name>
+
+To edit params, you MUST stop the relevant process first. Documentation states that editing config while process is running can have undesired effects.
+
+OBEY command to include other config files.
+
+Wildcards can be used in some commands.
+
+# Example - Inital data extract and load
+
+
+# Example - Setup simple replication with Pump Process
+
+
+# Oracle users
+
+### grant select_any_transaction
+
+create user ggtest identified by ggtest
+default tablespace users
+temporary tablespace temp;
+
+grant connect, create session, dba to ggtest;
+
+grant select_any_transaction to ggtest;
+grant DV_GOLDENGATE_REDO_ACCESS to ggtest;
+
+Ensure the database is adding supplemental log data. This can be done table by table or database wide. For Oracle issue:
+
+    SQL> alter database add supplemental log data;
+
+This ensures the database adds information about primary keys to the redo log files, which the Goldengate replicat process requires.
+
+From Oracle 11.2.0.4 you need to set a parameter in the database to enable goldengate replication:
+
+    SQL> alter system set enable_goldengate_replication=true scope=both;
+
+
+
+Ensure the mrg file has PURGEOLDEXTRACTS to purge the old trail files:
+
+    PURGEOLDEXTRACTS dirdat/*, USECHECKPOINTS
+
+1. Add a new extract called testext:
+
+###    GGSCI> ADD EXTRACT testext, INTEGRATED TRANLOG, BEGIN NOW
+    GGSCI> ADD EXTRACT testext, TRANLOG, BEGIN NOW, THREADS 1
+    GGSCI> ADD EXTTRAIL dirdat/te, EXTRACT testext
+
+Now create a parameter file for the actual extract:
+
+    GGSCI> edit params testext
+
+    -- Identify the Extract group:
+    EXTRACT testext
+    -- Specify database login information as needed for the database:
+    USERID ggtest@cleandb, PASSWORD ggtest123
+    -- tells gg to read the logs from the ASM instance through the main instance
+    TRANLOGOPTIONS DBLOGREADER
+
+    -- Specify the local trail that this Extract writes to and
+    EXTTRAIL dirdat/te
+    -- Specify tables to be captured:
+    TABLE ggdata.*;
+
+Start the extract process
+
+    GGSCI> start extract testext
+
+Check the status
+
+    GGSCI> status testext
+
+
+2. Add a pump process to read the trail files
+
+    GGSCI> add extract testextp, exttrailsource dirdat/te, BEGIN now
+    GGSCI> add rmttrail dirdat/te, EXTRACT testextp
+
+Create a parameter file for the pump process:
+
+    -- Identify the data pump group:
+    EXTRACT testextp
+    RMTHOST sl73ptdbdbd002, MGRPORT 2000
+    RMTTRAIL dirdat/te
+    -- Allow mapping, filtering, conversion or pass data through as-is:
+    PASSTHRU
+    -- Specify tables to be captured:
+    TABLE ggdata.*;
+
+3. Add a replicat process to read the trail files (on the target)
+
+The pump will make the trail files appear on the target database, so it is a simple matter of creating a replicate process on the target to read them.
+
+The first thing you need to do, before creating the replicat is create a checkpoint table in the database. One checkpoint table can be shared by many replicats. The best way to create the checkpoint table, is to create 1 table in a global location and store it in the GLOBALS file. Add the following line to the GLOBALS file and then exit and restart ggsci:
+
+    CHECKPOINTTABLE ggtest.checkpoint
+
+After restart ggsci, enter the following commands to create the checkpoint table on the database:
+
+    GGSCI> dblogin, userid ggtest@cleandb, password ggtest123
+    GGSCI> create checkpoint table ggtest.checkpoint
+
+Next, add the replicat process:
+
+    GGSCI> add replicat testrep, exttrail dirdat/te, begin now
+
+Create a config file for the replicat:
+
+    -- Identify the Replicat group:
+    REPLICAT testrep
+    -- State whether or not source and target definitions are identical:
+    ASSUMETARGETDEFS
+    -- Specify database login information as needed for the database:
+    USERID ggtest@cleandb, PASSWORD ggtest123
+    -- Specify tables for delivery:
+    MAP ggdata.*, TARGET ggdata.*;
+
+
+# Other configs
+
+ * Cascading replication - extract + pump on source -> replicat on target. Target also has extract and pump -> second target in chain
+
+ * One to many replication - extract + many pumps on source sending to many targets.
+
+ * Many to one (data warehouse replication) - extract + pump on each source. Each pump sends to remote trail with 1 replicat applying each trail.
+
+ * Active - Passive (Live standby) - In this scenario you have the usual extract + pump on the source with a replicat on the standby. Then you have a suspended extract and pump on the standby and a suspended relicat on the master.
+
+ * Active - Active (bi-directional) - 
+
+  SUPPRESSTRIGGERS option
+  ON DELETE CASCADE 
+
+  TRANLOGOPTIONS EXCLUDEUSER <Replicat_user>
+  IGNOREREPLICATES - stops replicat issued SQL being captured and replayed in a loop across active, active systems.
+
+
+
+
+
+
+
+
+
+C:\Users\sodonnel\Desktop\goldengate_docs\doc.1121\e29397.pdf page 47
+
+
+
+
+** Errors:
+
+2014-07-08 07:34:42  ERROR   OGG-00446  Oracle GoldenGate Capture for Oracle, testext.prm:  Opening file +FRADG/cleandb/onlinelog/group_2.258.844608695 in DBLOGREADER mode: (26723) ORA-26723: user "GGTEST" requires the role "DV_GOLDENGATE_REDO_ACCESS"
+
+Check whether Database Value is enabled:
+
+SQL> SELECT * FROM V$OPTION WHERE PARAMETER = 'Oracle Database Vault';
+
+PARAMETER
+----------------------------------------------------------------
+VALUE
+----------------------------------------------------------------
+Oracle Database Vault
+TRUE
+
+
+If it is enabled, check if the DVSYS user exists. If not, it probably means that DV was not correct installed, so check if the DVSYS user exists. If it does not exist, disable DV.
+
+  1. Shutdown the database
+  2. chopt disable dv
+  3. startup the database
+
+Now GG should run correctly without needing the role mentioned in the error message.
+
+
+

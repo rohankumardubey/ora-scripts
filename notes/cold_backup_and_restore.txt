@@ -7,8 +7,8 @@ To take a cold backup of the database:
     shutdown immediate 
     startup mount 
     run 
-    { allocate channel ch1 device type disk format 'c:\alaric_db_backup\alaricDB_%u_%p_%c';   
-      backup as compressed backupset incremental level 0 tag="Alaric_fullDB" database; 
+    { allocate channel ch1 device type disk format '/dborafiles/apex01_backup/apex01_%u_%p_%c';   
+      backup as compressed backupset incremental level 0 tag="Apex01_fullDB" database; 
     } 
     list backup tag="Alaric_fullDB";
 
@@ -45,6 +45,134 @@ Notice the DBID and SPFILE and Control File reference the data that was captured
 
 
 Some good detail (although a little old) here - http://www.orafusion.com/art_rman1.htm
+
+
+allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';   
+
+
+RUN
+{
+  allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';   
+  SET CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE DISK TO '/tmp/%F';
+  RESTORE SPFILE 
+    TO PFILE '?/dbs/initapex01.ora' 
+    from '/oraworkspace/apex01_backup/apex01_02pdgn0f_1_1'  
+  SHUTDOWN ABORT;
+}
+
+startup force nomount pfile='?/dbs/initapex01.ora';
+
+
+RUN
+{
+  allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';   
+  RESTORE CONTROLFILE FROM '/oraworkspace/apex01_backup/apex01_02pdgn0f_1_1';
+  ALTER DATABASE MOUNT;
+}
+
+
+
+run 
+{
+allocate channel ch1 device type disk format '/oraworkspace/apex01_backup/apex01_%u_%p_%c';  
+catalog start with '/oraworkspace/apex01_backup/apex01_01pdgmuo_1_1'; 
+set newname for datafile 1 to '/oraworkspace/apex01/system.dbf';
+set newname for datafile 2 to '/oraworkspace/apex01/sysaux.dbf';
+set newname for datafile 3 to '/oraworkspace/apex01/undo.dbf';
+set newname for datafile 4 to '/oraworkspace/apex01/users_01.dbf';
+set newname for datafile 5 to '/oraworkspace/apex01/apex_user_01.dbf';
+set newname for datafile 6 to '/oraworkspace/apex01/apex_files_01.dbf';
+
+SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo1.log'' TO ''/oraworkspace/apex01/redo1.log'' ";
+SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo2.log'' TO ''/oraworkspace/apex01/redo2.log'' ";
+SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo3.log'' TO ''/oraworkspace/apex01/redo3.log'' ";
+
+
+restore database;
+SWITCH DATAFILE ALL;
+}
+
+
+  SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo1.log''
+      TO ''/oraworkspace/apex01/redo1.log'' ";
+  SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo2.log''
+      TO ''/oraworkspace/apex01/redo2.log'' ";
+  SQL "ALTER DATABASE RENAME FILE ''/dborafiles/apex01/redo/redo3.log''
+      TO ''/oraworkspace/apex01/redo3.log'' ";
+
+
+  SQL "ALTER DATABASE RENAME FILE ''/dev3/oracle/dbs/redo02.log''
+      TO ''?/oradata/test/redo02.log'' ";
+
+
+SET NEWNAME FOR DATAFILE 1 TO '/system01.dbf';
+
+
+
+
+connected to target database: APEX01 (DBID=1643573941)
+
+
+restore spfile to PFILE '?/dbs/initapex01.ora' from '/oraworkspace/apex01_backup/apex01_02pdgn0f_1_1'  
+
+
+
+
+/u01/app/oracle/product/11.2.0.4/dbhome_1/dbs
+
+Starting backup at 16-JUL-14
+channel ch1: starting compressed incremental level 0 datafile backup set
+channel ch1: specifying datafile(s) in backup set
+input datafile file number=00003 name=/dborafiles/apex01/datafiles/undo.dbf
+input datafile file number=00002 name=/dborafiles/apex01/datafiles/sysaux.dbf
+input datafile file number=00005 name=/dborafiles/apex01/datafiles/apex_user_01.dbf
+input datafile file number=00006 name=/dborafiles/apex01/datafiles/apex_files_01.dbf
+input datafile file number=00001 name=/dborafiles/apex01/datafiles/system.dbf
+input datafile file number=00004 name=/dborafiles/apex01/datafiles/users_01.dbf
+channel ch1: starting piece 1 at 16-JUL-14
+channel ch1: finished piece 1 at 16-JUL-14
+piece handle=/dborafiles/apex01_backup/apex01_01pdgmuo_1_1 tag=APEX01_FULLDB comment=NONE
+channel ch1: backup set complete, elapsed time: 00:00:55
+channel ch1: starting compressed incremental level 0 datafile backup set
+channel ch1: specifying datafile(s) in backup set
+including current control file in backup set
+including current SPFILE in backup set
+channel ch1: starting piece 1 at 16-JUL-14
+channel ch1: finished piece 1 at 16-JUL-14
+piece handle=/dborafiles/apex01_backup/apex01_02pdgn0f_1_1 tag=APEX01_FULLDB comment=NONE
+channel ch1: backup set complete, elapsed time: 00:00:01
+Finished backup at 16-JUL-14
+released channel: ch1
+
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+1       Incr 0  267.04M    DISK        00:00:48     16-JUL-14
+        BP Key: 1   Status: AVAILABLE  Compressed: YES  Tag: APEX01_FULLDB
+        Piece Name: /dborafiles/apex01_backup/apex01_01pdgmuo_1_1
+  List of Datafiles in backup set 1
+  File LV Type Ckp SCN    Ckp Time  Name
+  ---- -- ---- ---------- --------- ----
+  1    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/system.dbf
+  2    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/sysaux.dbf
+  3    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/undo.dbf
+  4    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/users_01.dbf
+  5    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/apex_user_01.dbf
+  6    0  Incr 344249820984 16-JUL-14 /dborafiles/apex01/datafiles/apex_files_01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+2       Incr 0  1.03M      DISK        00:00:02     16-JUL-14
+        BP Key: 2   Status: AVAILABLE  Compressed: YES  Tag: APEX01_FULLDB
+        Piece Name: /dborafiles/apex01_backup/apex01_02pdgn0f_1_1
+  SPFILE Included: Modification time: 16-JUL-14
+  SPFILE db_unique_name: APEX01
+  Control File Included: Ckp SCN: 344249820984   Ckp time: 16-JUL-14
 
 
 

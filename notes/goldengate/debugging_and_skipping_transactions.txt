@@ -1,0 +1,69 @@
+# Debugging and Skipping Transactions
+
+To debug a 'MAPPING FAILED' error. The log show something like the following:
+
+2014-08-13 06:14:19  WARNING OGG-01431  Aborted grouped transaction on 'CFG.ACCESS_', Mapping error.
+2014-08-13 06:14:19  WARNING OGG-01003  Repositioning to rba 33263845 in seqno 46.
+2014-08-13 06:14:19  WARNING OGG-01151  Error mapping from CFG.ACCESS_ to CFG.ACCESS_.
+2014-08-13 06:14:19  WARNING OGG-01003  Repositioning to rba 33263845 in seqno 46.
+
+You will probably also see something in the log that shows which trail file is in use. If this message is not in the logs, then you can figure out which trail file by looking in the trail file directory for sequence 46.
+
+./dirdat/remote/CFGDB1EQ/CFG/c1000046
+
+To figure out what is going on, you need to use the logdump utility
+
+Open logdump:
+
+$ ./logdump
+logdump> open ./dirdat/remote/CFGDB1EQ/CFG/c1000046
+logdump> GHDR ON
+logdump> DETAIL ON
+logdump> DETAIL DATA
+
+# Reposition to just before the error
+logdump> pos 33263840
+
+# Scan for a transaction header
+logdump> SCANFORHEADER
+
+This will produce something that looks like:
+
+Hdr-Ind    :     E  (x45)     Partition  :     .  (x04)
+UndoFlag   :     .  (x00)     BeforeAfter:     B  (x42)
+RecLength  :    14  (x000e)   IO Time    : 2014/08/05 02:53:55.510.347
+IOType     :     3  (x03)     OrigNode   :   255  (xff)
+TransInd   :     .  (x00)     FormatType :     R  (x52)
+SyskeyLen  :     0  (x00)     Incomplete :     .  (x00)
+AuditRBA   :       2244       AuditPos   : 17175056
+Continued  :     N  (x00)     RecCount   :     1  (x01)
+
+2014/08/05 02:53:55.510.347 Delete               Len    14 RBA 33263845         <<<<<<<<<<<<<
+Name: CFG.ATTRIBUTE
+Before Image:                                             Partition 4   G  b
+ 0000 000a 0000 0048 dcd3 b160 1579                | .......H...`.y
+Column     0 (x0000), Len    10 (x000a)
+ 0000 0048 dcd3 b160 1579                          | ...H...`.y
+
+Notice the highlighted line - it has the RBA of our error, and also that it is a delete statement.
+
+In the header, note the TransInd is x00 - that indicates this is the first statement in a new transaction. 
+
+x00 - First statement in a transaction
+x01 - Statement in the middle of the transaction
+x02 - Last statement in a transaction
+x03 - Sole statement in transaction
+
+At this point you are looking at the first statment in the transaction - by using the 'N' command, you can move to the next statement in the transaction - if there are a lot of them, you may want to jump to the last statement in the transaction with the SCANFORENDTRANS (or SFET) command.
+
+
+
+Pressing N one last time moves you into the next transaction - note the RBA - (33341743 in this case)
+
+Now, you need to tell the replicat process to start at the next good transaction:
+
+ggsci> alter RQPRCFG, extseqno 46, extrba 33579410
+ggsci> start RQPRCFG
+
+
+Obviously doing this means the transaction you skipped will not be applied to the database, so if this is a production system you could be in trouble.
